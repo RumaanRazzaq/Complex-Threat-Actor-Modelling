@@ -75,9 +75,19 @@ def plot_histograms(df):
         "All Related Entities", "Tool-Only Related Entities", "Malware-Only Related Entities"
     ]
     
-    for i in variables:
-        pmf_data = df[i].value_counts(normalize=True).sort_index()
-        # print(f"PMF Data for {i} is: {pmf_data}")
+    for var in variables:
+        data = df[var].dropna()
+        if len(data) > 1:
+            median_val = np.median(data)
+            iqr_val = iqr(data)
+            kurtosis_val = stats.kurtosis(data)
+
+            print(f"\nStatistics for {var}:")
+            print(f"Median: {median_val:.2f}")
+            print(f"IQR: {iqr_val:.2f}")
+            print(f"Kurtosis: {kurtosis_val:.2f}")
+        else:
+            print(f"\nNot enough data for {var} to compute statistics.")
 
 
     fig, axes = plt.subplots(2, 4, figsize=(20, 10))
