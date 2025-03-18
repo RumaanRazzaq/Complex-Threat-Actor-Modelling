@@ -10,6 +10,7 @@ from scipy.stats import pearsonr
 from sklearn.linear_model import LinearRegression
 from datetime import datetime, timedelta
 import statsmodels.api as sm
+from scipy.stats import iqr
 
 def get_threat_group_data(driver):
     query = """
