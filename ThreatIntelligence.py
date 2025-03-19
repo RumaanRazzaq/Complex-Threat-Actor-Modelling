@@ -9,15 +9,24 @@ from OTXv2 import OTXv2
 from dotenv import find_dotenv, load_dotenv
 
 def reset_permissions(path):
-    # Generates list of directories, subdirectories, and files starting from the specified path
+    """
+    Recursively sets permissions to 777 for all files and directories starting from the specified path.
+    This makes all files and directories readable, writable, and executable by everyone - only used for this folder specifically to clear the outdated Github Repo
+    """
     for root, dirs, files in os.walk(path):
         for name in files:
             os.chmod(os.path.join(root, name), 0o777)
         for name in dirs:
             os.chmod(os.path.join(root, name), 0o777)
 
-# Function to create or update threat group nodes
 def store_threat_groups(driver, threat_groups):
+    """
+    Creates or updates threat group nodes in a Neo4j database. Deletes all existing data before inserting new threat groups.
+    
+    Parameters:
+    - driver: Neo4j database driver instance.
+    - threat_groups: List of dictionaries containing threat group data - taken from MITRE Github repo.
+    """
     with driver.session() as session:
         session.run("MATCH (n) DETACH DELETE n")
         print("All data has been deleted from the database.")
@@ -37,15 +46,20 @@ def store_threat_groups(driver, threat_groups):
                 aliases=group.get("aliases", [])
             )
 
-def store_pulses(driver, group_name, pulses, OTX_API_KEY):
+def store_pulses(driver, group_name, pulses):
     """
-    Display the pulse data in a readable format.
+    Stores pulse data in a Neo4j database and links it to threat groups.
+    
+    Parameters:
+    - driver: Neo4j database driver instance.
+    - group_name: Name of the threat group being stored.
+    - pulses: Dictionary containing pulse data from PulsediveInfo.json
     """
-    # Check if 'results' key exists in the response
+    # Check if 'results' key exists and contains a valid list and loops through the pulses
     if 'results' in pulses and isinstance(pulses['results'], list):
         if len(pulses['results']) != 0:            
             for pulse in pulses['results']:
-                # Access pulse details safely
+                # Accesses the pulse details safely - setting to N/A if variable not found
                 pulse_id = pulse.get('id', 'N/A')
                 pulse_name = pulse.get('name', 'N/A')
                 pulse_created = pulse.get('created', 'N/A')
@@ -55,7 +69,7 @@ def store_pulses(driver, group_name, pulses, OTX_API_KEY):
                 pulse_industries = pulse.get('industries', 'N/A')
                 
                 with driver.session() as session:
-                    # Create or update the Pulse node with additional properties
+                    # Create the Pulse node with additional properties
                     query_pulse = (
                         "MERGE (p:Pulse {name: $pulse_name, group: $group_name}) "
                         "ON CREATE SET p.createdBy = $group_name, "
@@ -96,15 +110,21 @@ def store_pulses(driver, group_name, pulses, OTX_API_KEY):
         print("Invalid response format.")
 
 def fetch_pulsedive_info(driver, group_name):
-    # Load the JSON file
+    """
+    Fetches Pulsedive threat intelligence information and stores relevant details. It starts by loading the JSON file containing Pulsedive threat intelligence data
+    We then ensure it is a list of records and iterate over each record. The necessary fields are extracted. 
+    The threat group's name checks if it matches the given group name. The extracted data is then stored into the database.
+
+    Parameters:
+    - driver: Neo4j database driver instance.
+    - group_name: Name of the threat group to match in the Pulsedive data.
+    """
+
     with open('PulsediveInfo.json', 'r') as file:
-        data = json.load(file)  # Load the JSON into a Python object
+        data = json.load(file)
     
-    # Ensure it's a list of records
     if isinstance(data, list):
-        # Iterate over each record
         for record in data:
-            # Extract the necessary fields
             name = record.get("threat")
             othernames = record.get("othernames", [])
             othernames = [name.lower() for name in othernames]
@@ -119,10 +139,20 @@ def fetch_pulsedive_info(driver, group_name):
                 else:
                     country_codes = attributes.get("countrycode", [])
 
-                # Store data inside the database
                 store_pulsedive_info(driver, group_name, related_entities, country_codes, ttps)
 
 def store_pulsedive_info(driver, group_name, related, country, ttps):
+    """
+    Stores Pulsedive threat intelligence information into a Neo4j database. 
+    This includes linking threat groups to country codes, related entities, and TTPs (tactics, techniques, and procedures).
+
+    Parameters:
+    - driver: Neo4j database driver instance.
+    - group_name: Name of the threat group.
+    - related: List of related entities (tools, malware, campaigns, etc.).
+    - country: List of country codes associated with the threat group.
+    - ttps: Dictionary containing tactics as keys and their respective techniques as values.
+    """
     with driver.session() as session:
         # Store country codes
         if len(country) > 0:
@@ -204,50 +234,53 @@ def store_pulsedive_info(driver, group_name, related, country, ttps):
                     })
 
 def download_repo():
-    # Path to the 'cti' directory
-    cti_path = 'c:/Users/Rumaan/Documents/SCC Work/SCC300/cti'
+    """
+    Clones the MITRE ATT&CK STIX data repository into the local 'cti' directory. 
+    If the directory already exists, it resets permissions and deletes it before downloading the latest version.
+    """
 
-    # Allow the deletion of cti directory
+    cti_path = 'c:/Users/Rumaan/Documents/SCC Work/SCC300/cti'
     reset_permissions(cti_path)
 
-    # Check if the 'cti' directory exists and delete if it does
     if os.path.exists(cti_path):
         shutil.rmtree(cti_path)
 
-    # Update Git Repo to latest version
     Repo.clone_from("https://github.com/mitre-attack/attack-stix-data.git", "cti")
 
 def fetch_pulses(group_name):
-    # Find .env file automatically
-    dotenv_path = find_dotenv()
-
-    # Load entries as environent variables
-    load_dotenv(dotenv_path)
-
-    OTX_API_KEY = os.getenv("OTX_API_KEY")
-
-    # Initialize the OTX API
-    otx = OTXv2(OTX_API_KEY)
-
-    pulses = otx.search_pulses(group_name)
+    """
+    Automatically locates and load the .env file. The OTX API key is retrieved from the environment variables.
+    We then initialize the OTX API client and query the API for pulses related to the given group name. The fetched pulses are returned.
     
+    Parameters:
+    - group_name: Name of the threat group to search for in OTX pulses.
+    
+    Returns:
+    - pulses: JSON response containing relevant threat intelligence pulses.
+    """
+
+    dotenv_path = find_dotenv()
+    load_dotenv(dotenv_path)
+    OTX_API_KEY = os.getenv("OTX_API_KEY")
+    otx = OTXv2(OTX_API_KEY)
+    pulses = otx.search_pulses(group_name)
     return pulses    
     
 def store_threat_group_data():
-    # Find .env file automatically
+    """
+    Loads environment variables from the .env file and retrieves database credentials and API keys.
+    We then establish a connection to the Neo4j database and stores threat group data.
+    Additional data is fetched from Pulsedive and AlienVault OTX and stored into the database.
+    """
+
     dotenv_path = find_dotenv()
-
-    # Load entries as environent variables
     load_dotenv(dotenv_path)
-
-    # Store URI and Database Credentials
     URI = "bolt://localhost:7687"
     DB_USER = os.getenv("DB_USER")
     DB_PASS = os.getenv("DB_PASS")
     OTX_API_KEY = os.getenv("OTX_API_KEY")
     AUTH = (DB_USER, DB_PASS)
 
-    # Connect to Database
     with GraphDatabase.driver(URI, auth=AUTH) as driver:
         driver.verify_connectivity()
         print("Successfully Connected")
